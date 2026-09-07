@@ -101,11 +101,8 @@ class Workspace:
             )
         )
 
-    def apply_changes(self, changes: list[FileChange], *, approved: bool) -> list[str]:
-        """Apply changes only after an explicit approval decision."""
-        if not approved:
-            raise PermissionError("File writes require explicit human approval.")
-
+    def validate_changes(self, changes: list[FileChange]) -> list[tuple[FileChange, Path]]:
+        """Validate a complete proposal batch without mutating the workspace."""
         resolved: list[tuple[FileChange, Path]] = []
         seen: set[Path] = set()
         for change in changes:
@@ -116,16 +113,31 @@ class Workspace:
                 )
             if path in seen:
                 raise WorkspaceViolation(f"Duplicate change for {change.path!r}")
+            if path.exists() and not path.is_file():
+                raise WorkspaceViolation(f"Target is not a file: {change.path!r}")
             seen.add(path)
             resolved.append((change, path))
+        return resolved
 
+    def apply_changes(self, changes: list[FileChange], *, approved: bool) -> list[str]:
+        """Apply changes only after an explicit approval decision."""
+        if not approved:
+            raise PermissionError("File writes require explicit human approval.")
+
+        resolved = self.validate_changes(changes)
+
+        created_directories: list[Path] = []
         originals: dict[Path, bytes | None] = {}
         changed_files = []
         try:
             for change, path in resolved:
-                if path.exists() and not path.is_file():
-                    raise WorkspaceViolation(f"Target is not a file: {change.path!r}")
                 originals[path] = path.read_bytes() if path.is_file() else None
+                missing_parents: list[Path] = []
+                parent = path.parent
+                while parent != self.root and not parent.exists():
+                    missing_parents.append(parent)
+                    parent = parent.parent
+                created_directories.extend(reversed(missing_parents))
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(change.new_content, encoding="utf-8")
                 changed_files.append(change.path)
@@ -135,6 +147,11 @@ class Workspace:
                     path.unlink(missing_ok=True)
                 else:
                     path.write_bytes(original)
+            for directory in reversed(created_directories):
+                try:
+                    directory.rmdir()
+                except OSError:
+                    pass
             if isinstance(exc, WorkspaceViolation):
                 raise
             raise WorkspaceViolation(

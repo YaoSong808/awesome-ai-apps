@@ -97,6 +97,30 @@ def test_rolls_back_an_incomplete_multi_file_change(tmp_path: Path) -> None:
     assert first.read_text(encoding="utf-8") == "original\n"
 
 
+def test_failed_batch_removes_new_parent_directories(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Rollback removes empty parent directories created by the batch."""
+    original_write_text = Path.write_text
+
+    def fail_second_write(path: Path, *args, **kwargs):
+        """Simulate an I/O failure after the first file is written."""
+        if path.name == "second.py":
+            raise OSError("simulated write failure")
+        return original_write_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fail_second_write)
+    workspace = Workspace(tmp_path)
+
+    with pytest.raises(WorkspaceViolation, match="Could not apply"):
+        workspace.apply_changes(
+            [change("new/nested/first.py"), change("second.py")], approved=True
+        )
+
+    assert not (tmp_path / "new").exists()
+    assert not (tmp_path / "second.py").exists()
+
+
 def test_rejects_non_utf8_files(tmp_path: Path) -> None:
     """Binary data becomes a recoverable workspace violation."""
     (tmp_path / "binary.dat").write_bytes(b"\xff\xfe")
@@ -130,6 +154,32 @@ def test_invalid_preview_emits_a_structured_summary(tmp_path: Path, capsys) -> N
     output = capsys.readouterr().out
     assert '"status": "invalid_proposal"' in output
     assert '"error":' in output
+
+
+def test_preview_rejects_duplicate_paths(tmp_path: Path, capsys) -> None:
+    """Duplicate targets are rejected before any diff is rendered."""
+    rendered = preview_changes(
+        Workspace(tmp_path), [change("same.py"), change("same.py")]
+    )
+
+    assert not rendered
+    output = capsys.readouterr().out
+    assert '"status": "invalid_proposal"' in output
+    assert "Duplicate change" in output
+    assert "PATCH PREVIEW" not in output
+
+
+def test_preview_rejects_directory_target(tmp_path: Path, capsys) -> None:
+    """Existing directories cannot reach the approval prompt as file targets."""
+    (tmp_path / "package").mkdir()
+
+    rendered = preview_changes(Workspace(tmp_path), [change("package")])
+
+    assert not rendered
+    output = capsys.readouterr().out
+    assert '"status": "invalid_proposal"' in output
+    assert "Target is not a file" in output
+    assert "PATCH PREVIEW" not in output
 
 
 def test_runs_only_the_predefined_pytest_command(tmp_path: Path) -> None:

@@ -46,6 +46,7 @@ def emit_summary(summary: RunSummary) -> None:
 def preview_changes(workspace: Workspace, changes: list[FileChange]) -> bool:
     """Validate and render every diff before asking for approval."""
     try:
+        workspace.validate_changes(changes)
         previews = [(change, workspace.preview_diff(change)) for change in changes]
     except WorkspaceViolation as exc:
         emit_summary(RunSummary(status="invalid_proposal", error=str(exc)))
