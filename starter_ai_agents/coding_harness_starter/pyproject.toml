@@ -1,5 +1,5 @@
 [project]
-name = "coding-harness-starter"
+name = "coding_harness_starter"
 version = "0.1.0"
 description = "Minimal PydanticAI coding harness with human-gated file writes"
 readme = "README.md"

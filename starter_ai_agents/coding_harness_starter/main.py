@@ -10,9 +10,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from agent import build_agent
-from models import RunSummary
+from models import FileChange, RunSummary
 from tools import AgentDependencies
-from workspace import Workspace
+from workspace import Workspace, WorkspaceViolation
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 DEFAULT_WORKSPACE = PROJECT_ROOT / "fixture_repo"
@@ -37,6 +37,27 @@ def approved_by_human(answer: str) -> bool:
     return answer.strip().lower() in {"y", "yes"}
 
 
+def emit_summary(summary: RunSummary) -> None:
+    """Print the final result using the same JSON shape on every path."""
+    print("\n=== RUN SUMMARY ===")
+    print(json.dumps(summary.model_dump(), indent=2))
+
+
+def preview_changes(workspace: Workspace, changes: list[FileChange]) -> bool:
+    """Validate and render every diff before asking for approval."""
+    try:
+        previews = [(change, workspace.preview_diff(change)) for change in changes]
+    except WorkspaceViolation as exc:
+        emit_summary(RunSummary(status="invalid_proposal", error=str(exc)))
+        return False
+
+    print("\n=== PATCH PREVIEW ===")
+    for change, diff in previews:
+        print(f"\n# {change.path}: {change.reason}")
+        print(diff or "(no changes)")
+    return True
+
+
 def main() -> int:
     """Run inspect, propose, approve, apply, test, and summarize."""
     load_dotenv(PROJECT_ROOT / ".env")
@@ -49,27 +70,26 @@ def main() -> int:
 
     print("\n=== STRUCTURED PROPOSAL ===")
     print(proposal.model_dump_json(indent=2))
-    print("\n=== PATCH PREVIEW ===")
-    for change in proposal.changes:
-        print(f"\n# {change.path}: {change.reason}")
-        print(workspace.preview_diff(change) or "(no changes)")
+    if not preview_changes(workspace, proposal.changes):
+        return 1
 
     answer = input("\nApply these changes and run the allowlisted tests? [y/N] ")
     if not approved_by_human(answer):
-        summary = RunSummary(status="rejected")
-        print("\n=== RUN SUMMARY ===")
-        print(summary.model_dump_json(indent=2))
+        emit_summary(RunSummary(status="rejected"))
         return 0
 
-    changed_files = workspace.apply_changes(proposal.changes, approved=True)
+    try:
+        changed_files = workspace.apply_changes(proposal.changes, approved=True)
+    except WorkspaceViolation as exc:
+        emit_summary(RunSummary(status="apply_failed", error=str(exc)))
+        return 1
     test_result = workspace.run_tests()
     summary = RunSummary(
         status="passed" if test_result.passed else "tests_failed",
         changed_files=changed_files,
         tests=test_result,
     )
-    print("\n=== RUN SUMMARY ===")
-    print(json.dumps(summary.model_dump(), indent=2))
+    emit_summary(summary)
     return 0 if test_result.passed else 1
 
 

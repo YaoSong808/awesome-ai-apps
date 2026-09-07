@@ -15,6 +15,7 @@ models.ALLOW_MODEL_REQUESTS = False
 def test_agent_tools_and_structured_output_without_network(
     tmp_path: Path, monkeypatch
 ) -> None:
+    """The real agent wiring produces validated output with a test model."""
     (tmp_path / "calculator.py").write_text(
         "def add(left, right):\n    return left - right\n", encoding="utf-8"
     )

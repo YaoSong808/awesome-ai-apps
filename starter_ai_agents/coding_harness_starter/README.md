@@ -124,9 +124,12 @@ git restore fixture_repo/calculator.py
 - `Workspace.apply_changes()` requires `approved=True`; the CLI supplies it only
   after an explicit `y` or `yes` response.
 - Every proposed path is validated before the first file is written.
+- A failed multi-file apply restores earlier files, avoiding a partially applied patch.
 - Tests use a constant argument list and `shell=False`. The model cannot select or
   modify the command.
 - File reads are capped at 50 KB to keep this educational starter bounded.
+- Invalid proposals and test timeouts produce the same structured run-summary shape
+  as successful and rejected runs.
 
 This is a local workspace boundary, not an operating-system sandbox. For
 untrusted repositories or commands, use a container or dedicated sandbox service.

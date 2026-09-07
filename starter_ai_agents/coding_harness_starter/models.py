@@ -31,6 +31,7 @@ class TestResult(BaseModel):
 
     @property
     def passed(self) -> bool:
+        """Return whether pytest exited successfully."""
         return self.returncode == 0
 
 
@@ -40,3 +41,4 @@ class RunSummary(BaseModel):
     status: str
     changed_files: list[str] = Field(default_factory=list)
     tests: TestResult | None = None
+    error: str | None = None
